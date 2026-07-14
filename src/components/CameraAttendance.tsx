@@ -444,6 +444,7 @@ export default function CameraAttendance({
       setLastScannedStudent(student);
       setSimilarityScore(Math.floor(Math.random() * 5) + 95); // High score but duplicate
       audioService.playError();
+      setSelectedSimStudentId(''); // Kết thúc phiên quét học sinh này
       return;
     }
 
@@ -460,6 +461,7 @@ export default function CameraAttendance({
     setSimilarityScore(Math.floor(Math.random() * 8) + 92); // High matching score [92-99%]
     setScanState('success');
     audioService.playSuccess();
+    setSelectedSimStudentId(''); // Kết thúc điểm danh cho trẻ đó và sẵn sàng cho trẻ tiếp theo
 
     // 4. Capture real photo from live video feed if active
     let capturedPhoto = student.avatar;
@@ -615,6 +617,50 @@ export default function CameraAttendance({
 
     return () => clearTimeout(autoScanTimer);
   }, [isActive, autoPilot, scanState, students, attendance]);
+
+  // Tự động nhận diện khuôn mặt sau 3.5 giây khi camera đang mở ở trạng thái rảnh (kể cả khi không bật Auto-pilot)
+  useEffect(() => {
+    if (!isActive || autoPilot) return;
+    if (scanState !== 'idle') return;
+
+    const timer = setTimeout(() => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
+      
+      let studentToScan: Student | null = null;
+      if (selectedSimStudentId) {
+        studentToScan = students.find(s => s.id === selectedSimStudentId) || null;
+      } else {
+        const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
+        if (eligibleStudents.length > 0) {
+          studentToScan = eligibleStudents[0];
+        } else if (students.length > 0) {
+          // Nếu tất cả đã được điểm danh, chọn ngẫu nhiên một bé để hiển thị thông tin trùng lặp
+          const randomIndex = Math.floor(Math.random() * students.length);
+          studentToScan = students[randomIndex];
+        }
+      }
+
+      if (studentToScan) {
+        triggerScanForStudent(studentToScan);
+      }
+    }, 3500); // Đợi 3.5 giây tự động lock-on nhận diện
+
+    return () => clearTimeout(timer);
+  }, [isActive, autoPilot, scanState, students, attendance, selectedSimStudentId]);
+
+  // Tự động kết thúc phiên điểm danh của bé và chuyển về trạng thái chờ quét sau 4.5 giây hiển thị kết quả thành công
+  useEffect(() => {
+    if (!isActive || autoPilot) return;
+    if (scanState === 'idle' || scanState === 'scanning') return;
+
+    const resetTimer = setTimeout(() => {
+      setScanState('idle');
+      setSelectedSimStudentId('');
+    }, 4500); // hiển thị kết quả trong 4.5 giây rồi chuyển về màn hình camera chờ quét bé tiếp theo
+
+    return () => clearTimeout(resetTimer);
+  }, [isActive, autoPilot, scanState]);
 
   // Triggering simulation with student from simulator dropdown
   const triggerSimulatedCheckIn = () => {
@@ -1043,6 +1089,26 @@ export default function CameraAttendance({
                       </div>
                     </div>
                   )}
+
+                  {/* Nút bấm kết thúc điểm danh cho trẻ để quét tiếp (Chế độ trình chiếu) */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-widest uppercase transition shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle size={14} />
+                      <span>Kết thúc & Tiếp tục quét ➔</span>
+                    </button>
+                    {!autoPilot && (
+                      <p className="text-center text-[9px] text-slate-400 mt-1.5 animate-pulse">
+                        Tự động tiếp tục sau 4.5 giây...
+                      </p>
+                    )}
+                  </div>
                 </motion.div>
               )}
 
@@ -1069,6 +1135,18 @@ export default function CameraAttendance({
                   <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-400 font-bold w-full max-w-xs">
                     ⚠️ TRÙNG LẶP: ĐÃ ĐIỂM DANH HÔM NAY
                   </div>
+                  <div className="pt-2 w-full max-w-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Tiếp tục quét trẻ khác ➔</span>
+                    </button>
+                  </div>
                 </motion.div>
               )}
 
@@ -1090,6 +1168,18 @@ export default function CameraAttendance({
                     <p className="text-xs text-slate-400 max-w-xs mt-1">
                       Hệ thống không tìm thấy hồ sơ học sinh khớp với dữ liệu sinh trắc học này. Vui lòng thử lại hoặc quét thủ công.
                     </p>
+                  </div>
+                  <div className="pt-2 w-full max-w-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Thử quét lại ➔</span>
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -1743,6 +1833,26 @@ export default function CameraAttendance({
                       </div>
                     ) : null}
                   </div>
+
+                  {/* Nút bấm kết thúc điểm danh cho trẻ để quét tiếp */}
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold tracking-wider uppercase transition shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle size={14} />
+                      <span>Kết thúc & Tiếp tục quét ➔</span>
+                    </button>
+                    {!autoPilot && (
+                      <p className="text-center text-[9px] text-slate-400 mt-1.5 animate-pulse">
+                        Tự động tiếp tục sau 4.5 giây...
+                      </p>
+                    )}
+                  </div>
                 </motion.div>
               )}
 
@@ -1778,6 +1888,19 @@ export default function CameraAttendance({
                     <span>CẢNH BÁO: TRÙNG LẶP HỒ SƠ</span>
                     <span>KHÔNG GHI NHẬN LẠI</span>
                   </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Tiếp tục quét trẻ khác ➔</span>
+                    </button>
+                  </div>
                 </motion.div>
               )}
 
@@ -1797,6 +1920,19 @@ export default function CameraAttendance({
                     <p className="text-xs text-slate-400 max-w-xs leading-normal">
                       Hồ sơ sinh trắc của người này không trùng khớp với bất kỳ học sinh nào đã đăng ký trong hệ thống (Độ khớp: {similarityScore}%).
                     </p>
+                  </div>
+
+                  <div className="pt-2 w-full">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScanState('idle');
+                        setSelectedSimStudentId('');
+                      }}
+                      className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                    >
+                      <span>Thử quét lại hoặc đổi trẻ khác ➔</span>
+                    </button>
                   </div>
                 </motion.div>
               )}
