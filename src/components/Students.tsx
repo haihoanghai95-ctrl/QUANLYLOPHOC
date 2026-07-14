@@ -36,7 +36,9 @@ import {
   Check,
   AlertTriangle,
   LayoutGrid,
-  List
+  List,
+  Clock,
+  XCircle
 } from 'lucide-react';
 import { Student, Classroom, Gender, SchoolSettings } from '../types';
 import { generateMockEmbedding } from '../utils/faceSim';
@@ -82,6 +84,59 @@ interface StudentsProps {
 
 export default function Students({ students, classrooms, saveStudents, settings }: StudentsProps) {
   const session = useMemo(() => StorageService.getSession(), []);
+  
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  const studentAttendanceStats = useMemo(() => {
+    try {
+      const records = StorageService.getAttendance();
+      const statsMap: Record<string, {
+        todayRecord?: any;
+        monthlyRate: number;
+        totalChecked: number;
+        presentCount: number;
+        lateCount: number;
+        absentCount: number;
+      }> = {};
+
+      students.forEach(s => {
+        const studentRecords = records.filter(r => r.studentId === s.id);
+        const todayRecord = studentRecords.find(r => r.date === todayStr);
+
+        const currentMonthStr = todayStr.slice(0, 7); // "YYYY-MM"
+        const monthlyRecords = studentRecords.filter(r => r.date.startsWith(currentMonthStr));
+        const totalChecked = monthlyRecords.length;
+        const presentCount = monthlyRecords.filter(r => r.status === 'present').length;
+        const lateCount = monthlyRecords.filter(r => r.status === 'late').length;
+        const absentCount = monthlyRecords.filter(r => r.status === 'absent').length;
+
+        const monthlyRate = totalChecked > 0 
+          ? Math.round(((presentCount + lateCount) / totalChecked) * 100) 
+          : 100;
+
+        statsMap[s.id] = {
+          todayRecord,
+          monthlyRate,
+          totalChecked,
+          presentCount,
+          lateCount,
+          absentCount
+        };
+      });
+
+      return statsMap;
+    } catch (e) {
+      console.error(e);
+      return {};
+    }
+  }, [students, todayStr]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [monthFilter, setMonthFilter] = useState('all');
@@ -1972,28 +2027,77 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                 {/* Header Profile Info */}
                 <div className="p-5 flex flex-col items-center text-center">
                   
-                  {/* Avatar with Glow indicator - Larger size for face recognition */}
-                  <div className="relative mb-3">
-                    <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-100 border-4 border-slate-100 dark:border-slate-800 shadow-inner">
-                      <img
-                        src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
-                        alt={s.fullName}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
+                  {/* Avatar with Glow indicator & Today's attendance ring */}
+                  {(() => {
+                    const stats = studentAttendanceStats[s.id] || {
+                      monthlyRate: 100,
+                      totalChecked: 0,
+                      presentCount: 0,
+                      lateCount: 0,
+                      absentCount: 0
+                    };
+                    const todayRecord = stats.todayRecord;
                     
-                    {/* Bio status (face registered or not) */}
-                    {s.faceEmbedding ? (
-                      <span className="absolute bottom-1 right-1 p-1.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Đã đăng ký khuôn mặt">
-                        <Camera size={12} className="text-white" />
-                      </span>
-                    ) : (
-                      <span className="absolute bottom-1 right-1 p-1.5 bg-rose-400 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Chưa đăng ký">
-                        <ShieldAlert size={12} className="text-white" />
-                      </span>
-                    )}
-                  </div>
+                    let borderColor = "border-slate-100 dark:border-slate-800 shadow-inner";
+                    let glowEffect = "";
+                    let statusLabel = "Chưa điểm danh";
+                    let statusBadgeClass = "bg-slate-50 text-slate-500 dark:bg-slate-850 dark:text-slate-400 border border-slate-100 dark:border-slate-800";
+                    let StatusIcon = null;
+
+                    if (todayRecord) {
+                      if (todayRecord.status === 'present') {
+                        borderColor = "border-emerald-500 dark:border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.35)]";
+                        glowEffect = "ring-4 ring-emerald-500/10";
+                        statusLabel = "Có mặt đúng giờ";
+                        statusBadgeClass = "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30";
+                        StatusIcon = Check;
+                      } else if (todayRecord.status === 'late') {
+                        borderColor = "border-amber-500 dark:border-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.35)]";
+                        glowEffect = "ring-4 ring-amber-500/10";
+                        statusLabel = "Đi học muộn";
+                        statusBadgeClass = "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30";
+                        StatusIcon = Clock;
+                      } else if (todayRecord.status === 'absent') {
+                        borderColor = "border-rose-500 dark:border-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.35)]";
+                        glowEffect = "ring-4 ring-rose-500/10";
+                        statusLabel = "Vắng mặt";
+                        statusBadgeClass = "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30";
+                        StatusIcon = XCircle;
+                      }
+                    }
+
+                    return (
+                      <div className="flex flex-col items-center">
+                        <div className={`relative mb-3 ${glowEffect} rounded-full transition-all duration-300`}>
+                          <div className={`w-24 h-24 rounded-full overflow-hidden bg-slate-100 border-4 ${borderColor} transition-all duration-300`}>
+                            <img
+                              src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
+                              alt={s.fullName}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          
+                          {/* Bio status (face registered or not) */}
+                          {s.faceEmbedding ? (
+                            <span className="absolute bottom-0 right-0 p-1.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Đã đăng ký khuôn mặt">
+                              <Camera size={11} className="text-white" />
+                            </span>
+                          ) : (
+                            <span className="absolute bottom-0 right-0 p-1.5 bg-slate-400 dark:bg-slate-600 rounded-full border-2 border-white dark:border-slate-900 text-[10px]" title="Chưa đăng ký">
+                              <ShieldAlert size={11} className="text-white" />
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Today's Attendance Badge */}
+                        <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold ${statusBadgeClass} mb-3 shadow-2xs`}>
+                          {StatusIcon && <StatusIcon size={10} className="shrink-0" />}
+                          <span>{statusLabel}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="space-y-1">
                     <h3 className="text-sm font-bold text-slate-800 dark:text-white line-clamp-1 group-hover:text-blue-500 transition-colors">
@@ -2018,6 +2122,49 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                       <Mail size={12} className="text-slate-400 shrink-0" />
                       <span className="truncate">{s.email || 'Chưa cập nhật'}</span>
                     </div>
+
+                    {/* Attendance Stats & Progress Bar */}
+                    {(() => {
+                      const stats = studentAttendanceStats[s.id] || {
+                        monthlyRate: 100,
+                        totalChecked: 0,
+                        presentCount: 0,
+                        lateCount: 0,
+                        absentCount: 0
+                      };
+                      return (
+                        <div className="border-t border-dashed border-slate-100 dark:border-slate-800/80 pt-2.5 mt-2 space-y-1.5">
+                          <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            <span className="flex items-center gap-1">📊 Chuyên cần tháng này:</span>
+                            <span className={`${stats.totalChecked > 0 ? (stats.monthlyRate >= 90 ? 'text-emerald-600 dark:text-emerald-400' : stats.monthlyRate >= 75 ? 'text-amber-500' : 'text-rose-500') : 'text-slate-400'}`}>
+                              {stats.totalChecked > 0 ? `${stats.monthlyRate}%` : 'Chưa có dữ liệu'}
+                            </span>
+                          </div>
+                          
+                          {stats.totalChecked > 0 ? (
+                            <>
+                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-100 dark:border-slate-850 shadow-inner">
+                                <div 
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    stats.monthlyRate >= 90 ? 'bg-emerald-500' : stats.monthlyRate >= 75 ? 'bg-amber-500' : 'bg-rose-500'
+                                  }`}
+                                  style={{ width: `${stats.monthlyRate}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between text-[9px] text-slate-400 dark:text-slate-500 font-bold">
+                                <span className="text-emerald-600 dark:text-emerald-400/80">Có mặt: {stats.presentCount}</span>
+                                <span className="text-amber-500 dark:text-amber-400/80">Trễ: {stats.lateCount}</span>
+                                <span className="text-rose-500 dark:text-rose-400/80">Nghỉ: {stats.absentCount}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-[9px] text-slate-400 dark:text-slate-500 italic">
+                              Học sinh chưa được điểm danh trong tháng này
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Học phí Năng khiếu & Trạng thái thanh toán */}
                     {(() => {
@@ -2140,6 +2287,7 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                     <th className="py-3.5 px-4">Thông tin cơ bản</th>
                     <th className="py-3.5 px-4">Lớp & Liên hệ</th>
                     <th className="py-3.5 px-4">Gương mặt</th>
+                    <th className="py-3.5 px-4">Chuyên cần</th>
                     <th className="py-3.5 px-4">Học phí ({monthFilter === 'all' ? '2026-07' : monthFilter})</th>
                     <th className="py-3.5 px-4 w-[220px]">Ghi chú nhanh</th>
                     <th className="py-3.5 px-4 text-right">Thao tác</th>
@@ -2155,25 +2303,48 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                         {/* Avatar & Name & Code */}
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
-                            <div className="relative shrink-0">
-                              <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-100 border border-slate-200 dark:border-slate-700">
-                                <img
-                                  src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
-                                  alt={s.fullName}
-                                  referrerPolicy="no-referrer"
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                              {s.faceEmbedding ? (
-                                <span className="absolute -bottom-1 -right-1 p-0.5 bg-emerald-500 rounded-full border border-white dark:border-slate-900 text-[6px]">
-                                  <Camera size={8} className="text-white" />
-                                </span>
-                              ) : (
-                                <span className="absolute -bottom-1 -right-1 p-0.5 bg-rose-400 rounded-full border border-white dark:border-slate-900 text-[6px]">
-                                  <ShieldAlert size={8} className="text-white" />
-                                </span>
-                              )}
-                            </div>
+                            {(() => {
+                              const stats = studentAttendanceStats[s.id] || {
+                                monthlyRate: 100,
+                                totalChecked: 0,
+                                presentCount: 0,
+                                lateCount: 0,
+                                absentCount: 0
+                              };
+                              const todayRecord = stats.todayRecord;
+                              
+                              let borderClass = "border-slate-200 dark:border-slate-700";
+                              if (todayRecord) {
+                                if (todayRecord.status === 'present') {
+                                  borderClass = "border-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.25)]";
+                                } else if (todayRecord.status === 'late') {
+                                  borderClass = "border-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.25)]";
+                                } else if (todayRecord.status === 'absent') {
+                                  borderClass = "border-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.25)]";
+                                }
+                              }
+                              return (
+                                <div className="relative shrink-0">
+                                  <div className={`w-10 h-10 rounded-full overflow-hidden bg-slate-100 border-2 ${borderClass} transition-all duration-300`}>
+                                    <img
+                                      src={s.avatar || StorageService.getNewAvatar(s.fullName, 0)}
+                                      alt={s.fullName}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                  {s.faceEmbedding ? (
+                                    <span className="absolute -bottom-1 -right-1 p-0.5 bg-emerald-500 rounded-full border border-white dark:border-slate-900 text-[6px]">
+                                      <Camera size={8} className="text-white" />
+                                    </span>
+                                  ) : (
+                                    <span className="absolute -bottom-1 -right-1 p-0.5 bg-slate-400 rounded-full border border-white dark:border-slate-900 text-[6px]">
+                                      <ShieldAlert size={8} className="text-white" />
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             <div>
                               <h4 className="font-bold text-slate-800 dark:text-white line-clamp-1 group-hover:text-blue-500 transition-colors">
                                 {s.fullName}
@@ -2221,6 +2392,72 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                               <ShieldAlert size={10} className="text-rose-500" /> Chưa đăng ký
                             </span>
                           )}
+                        </td>
+
+                        {/* Attendance Status & Stats */}
+                        <td className="py-3.5 px-4">
+                          {(() => {
+                            const stats = studentAttendanceStats[s.id] || {
+                              monthlyRate: 100,
+                              totalChecked: 0,
+                              presentCount: 0,
+                              lateCount: 0,
+                              absentCount: 0
+                            };
+                            const todayRecord = stats.todayRecord;
+                            
+                            let todayStatusLabel = "Chưa điểm danh";
+                            let todayStatusBadge = "bg-slate-50 text-slate-500 dark:bg-slate-800/40 dark:text-slate-400 border border-slate-100 dark:border-slate-800";
+                            let StatusIcon = null;
+
+                            if (todayRecord) {
+                              if (todayRecord.status === 'present') {
+                                todayStatusLabel = "Có mặt";
+                                todayStatusBadge = "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30";
+                                StatusIcon = Check;
+                              } else if (todayRecord.status === 'late') {
+                                todayStatusLabel = "Trễ";
+                                todayStatusBadge = "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30";
+                                StatusIcon = Clock;
+                              } else if (todayRecord.status === 'absent') {
+                                todayStatusLabel = "Vắng";
+                                todayStatusBadge = "bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30";
+                                StatusIcon = XCircle;
+                              }
+                            }
+
+                            return (
+                              <div className="space-y-1.5 w-[130px]">
+                                {/* Today Status Badge */}
+                                <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${todayStatusBadge}`}>
+                                  {StatusIcon && <StatusIcon size={8} />}
+                                  <span>{todayStatusLabel}</span>
+                                </div>
+
+                                {/* Monthly Rate */}
+                                <div className="space-y-0.5">
+                                  <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 dark:text-slate-400">
+                                    <span>Tỉ lệ tháng:</span>
+                                    <span className={stats.totalChecked > 0 ? (stats.monthlyRate >= 90 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-650 dark:text-slate-350') : 'text-slate-400'}>
+                                      {stats.totalChecked > 0 ? `${stats.monthlyRate}%` : 'N/A'}
+                                    </span>
+                                  </div>
+                                  {stats.totalChecked > 0 ? (
+                                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden border border-slate-100 dark:border-slate-850">
+                                      <div 
+                                        className={`h-full rounded-full ${
+                                          stats.monthlyRate >= 90 ? 'bg-emerald-500' : stats.monthlyRate >= 75 ? 'bg-amber-500' : 'bg-rose-500'
+                                        }`}
+                                        style={{ width: `${stats.monthlyRate}%` }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-[8px] text-slate-450 italic">Chưa có dữ liệu</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         
                         {/* Tuition fees & Paid Status */}
