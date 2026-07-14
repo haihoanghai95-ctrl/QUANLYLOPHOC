@@ -119,6 +119,21 @@ export default function CameraAttendance({
   // Camera selection: 'user' (front) or 'environment' (back)
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
+  // Screen size detection for responsive video viewport and aspect-ratio targeting
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    checkIsMobile();
+    window.addEventListener('resize', checkIsMobile);
+    return () => window.removeEventListener('resize', checkIsMobile);
+  }, []);
+
+  const canvasWidth = isMobile ? 375 : 500;
+  const canvasHeight = isMobile ? 500 : 375;
+
   // Turn on actual Device Camera
   const startScanningSession = async (modeToUse = facingMode) => {
     setErrorMessage('');
@@ -132,11 +147,13 @@ export default function CameraAttendance({
       streamRef.current = null;
     }
 
+    const checkIsMobileNow = window.innerWidth < 640;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
-          width: { ideal: 640 }, 
-          height: { ideal: 480 }, 
+          width: { ideal: checkIsMobileNow ? 480 : 640 }, 
+          height: { ideal: checkIsMobileNow ? 640 : 480 }, 
           facingMode: modeToUse 
         },
         audio: false,
@@ -693,7 +710,7 @@ export default function CameraAttendance({
               </span>
             </div>
 
-            <div className="relative w-full max-w-[580px] aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
+            <div className="relative w-full max-w-[580px] aspect-[3/4] sm:aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
               {/* Camera view */}
               {isActive && !hasCameraError && (
                 <>
@@ -720,8 +737,8 @@ export default function CameraAttendance({
               {/* HUD Canvas overlay */}
               <canvas
                 ref={canvasRef}
-                width={500}
-                height={375}
+                width={canvasWidth}
+                height={canvasHeight}
                 className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
               />
 
@@ -1258,7 +1275,7 @@ export default function CameraAttendance({
           </div>
 
           {/* Video stream container with relative Canvas overlay */}
-          <div className="relative w-full max-w-[500px] aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl flex items-center justify-center">
+          <div className="relative w-full max-w-[500px] aspect-[3/4] sm:aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xl flex items-center justify-center">
             
             {/* Real device stream */}
             {isActive && !hasCameraError && (
@@ -1286,8 +1303,8 @@ export default function CameraAttendance({
             {/* Glowing HUD Canvas overlay draws box & face points */}
             <canvas
               ref={canvasRef}
-              width={500}
-              height={375}
+              width={canvasWidth}
+              height={canvasHeight}
               className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
             />
 
