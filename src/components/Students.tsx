@@ -646,21 +646,64 @@ export default function Students({ students, classrooms, saveStudents, settings 
   };
 
   const captureSnapshot = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Trích xuất ảnh dưới dạng base64
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        setCapturedImage(dataUrl);
-        audioService.playSuccess();
-        stopCamera();
+    try {
+      if (videoRef.current && canvasRef.current) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Fallback to client size or default size if video dimensions are 0 (common on some mobile browsers before metadata loads)
+          const width = video.videoWidth || video.clientWidth || 320;
+          const height = video.videoHeight || video.clientHeight || 240;
+          
+          canvas.width = width;
+          canvas.height = height;
+          
+          // Clear previous canvas content
+          ctx.clearRect(0, 0, width, height);
+          
+          // Mirror the image horizontally if we are using the user (front) camera to match the live preview
+          if (facingMode === 'user') {
+            ctx.translate(width, 0);
+            ctx.scale(-1, 1);
+          }
+          
+          ctx.drawImage(video, 0, 0, width, height);
+          
+          // Reset transform
+          if (facingMode === 'user') {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+          }
+          
+          // Extract base64 image
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          if (dataUrl && dataUrl !== 'data:,') {
+            setCapturedImage(dataUrl);
+            audioService.playSuccess();
+            stopCamera();
+          } else {
+            // Attempt fallback capture without transform if dataUrl was empty
+            console.warn("toDataURL returned empty, trying fallback without transform");
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(video, 0, 0, width, height);
+            const fallbackUrl = canvas.toDataURL('image/jpeg', 0.85);
+            if (fallbackUrl && fallbackUrl !== 'data:,') {
+              setCapturedImage(fallbackUrl);
+              audioService.playSuccess();
+              stopCamera();
+            } else {
+              setFormError('Không thể xuất dữ liệu hình ảnh từ Camera. Vui lòng thử lại.');
+            }
+          }
+        } else {
+          setFormError('Không thể tạo bộ dựng ảnh (Canvas 2D Context).');
+        }
+      } else {
+        setFormError('Không tìm thấy máy ảnh hoạt động.');
       }
+    } catch (err: any) {
+      console.error('Lỗi khi chụp ảnh học sinh:', err);
+      setFormError(`Không thể chụp ảnh: ${err.message || err}`);
     }
   };
 
