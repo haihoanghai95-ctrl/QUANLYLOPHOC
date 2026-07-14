@@ -24,7 +24,8 @@ import {
   Printer,
   X,
   Sun,
-  Contrast
+  Contrast,
+  RefreshCw
 } from 'lucide-react';
 import { Student, AttendanceRecord, AttendanceStatus, SchoolSettings } from '../types';
 import { audioService } from '../utils/audio';
@@ -115,29 +116,51 @@ export default function CameraAttendance({
     }
   };
 
+  // Camera selection: 'user' (front) or 'environment' (back)
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
   // Turn on actual Device Camera
-  const startScanningSession = async () => {
+  const startScanningSession = async (modeToUse = facingMode) => {
     setErrorMessage('');
     setHasCameraError(false);
     setScanState('idle');
     setLastScannedStudent(null);
     setIsActive(true);
 
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: { 
+          width: { ideal: 640 }, 
+          height: { ideal: 480 }, 
+          facingMode: modeToUse 
+        },
         audio: false,
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.play().catch(playErr => {
+          console.warn("Video play failed:", playErr);
+        });
       }
     } catch (e) {
       console.warn('Cannot obtain camera feed:', e);
       setHasCameraError(true);
       setErrorMessage('Không tìm thấy Camera hoặc trình duyệt bị từ chối quyền truy cập. Hệ thống sẽ bật chế độ quét mô phỏng.');
       setIsPermissionModalOpen(true);
+    }
+  };
+
+  const toggleFacingMode = async () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    if (isActive) {
+      await startScanningSession(nextMode);
     }
   };
 
@@ -673,13 +696,25 @@ export default function CameraAttendance({
             <div className="relative w-full max-w-[580px] aspect-[4/3] bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
               {/* Camera view */}
               {isActive && !hasCameraError && (
-                <video
-                  ref={videoRef}
-                  className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
-                  style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
-                  playsInline
-                  muted
-                />
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`absolute inset-0 w-full h-full object-cover ${facingMode === 'user' ? 'transform scale-x-[-1]' : ''}`}
+                    style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
+                  />
+                  {/* Floating Switch Camera button */}
+                  <button
+                    type="button"
+                    onClick={toggleFacingMode}
+                    className="absolute top-4 right-4 z-30 p-2.5 bg-slate-900/80 hover:bg-slate-900 backdrop-blur-md text-white border border-slate-700/60 rounded-full shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                    title="Đổi camera trước/sau"
+                  >
+                    <RefreshCw size={14} className="text-white" />
+                  </button>
+                </>
               )}
 
               {/* HUD Canvas overlay */}
@@ -1227,13 +1262,25 @@ export default function CameraAttendance({
             
             {/* Real device stream */}
             {isActive && !hasCameraError && (
-              <video
-                ref={videoRef}
-                className="absolute inset-0 w-full h-full object-cover transform scale-x-[-1]"
-                style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
-                playsInline
-                muted
-              />
+              <>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`absolute inset-0 w-full h-full object-cover ${facingMode === 'user' ? 'transform scale-x-[-1]' : ''}`}
+                  style={{ filter: `brightness(${brightness}%) contrast(${contrast}%)` }}
+                />
+                {/* Floating Switch Camera button */}
+                <button
+                  type="button"
+                  onClick={toggleFacingMode}
+                  className="absolute top-4 right-4 z-30 p-2.5 bg-slate-900/80 hover:bg-slate-900 backdrop-blur-md text-white border border-slate-700/60 rounded-full shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Đổi camera trước/sau"
+                >
+                  <RefreshCw size={14} className="text-white" />
+                </button>
+              </>
             )}
 
             {/* Glowing HUD Canvas overlay draws box & face points */}

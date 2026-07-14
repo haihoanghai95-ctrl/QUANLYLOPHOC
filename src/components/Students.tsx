@@ -589,27 +589,50 @@ export default function Students({ students, classrooms, saveStudents, settings 
     }, 1500);
   };
 
+  // Camera selection: 'user' (front) or 'environment' (back)
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
   // Camera Capture Mechanics
-  const startCamera = async () => {
+  const startCamera = async (modeToUse = facingMode) => {
     setIsCameraActive(true);
     setCapturedImage(null);
     setFormError('');
     setHasCameraError(false);
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' },
+        video: { 
+          width: { ideal: 320 }, 
+          height: { ideal: 240 }, 
+          facingMode: modeToUse 
+        },
         audio: false,
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.play().catch(playErr => {
+          console.warn("Video play failed:", playErr);
+        });
       }
     } catch (e) {
       console.error('Cannot access camera:', e);
       setFormError('Không thể mở Camera của thiết bị. Vui lòng kiểm tra quyền truy cập.');
       setHasCameraError(true);
       setIsCameraActive(false);
+    }
+  };
+
+  const toggleFacingMode = async () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    if (isCameraActive) {
+      await startCamera(nextMode);
     }
   };
 
@@ -3393,9 +3416,20 @@ HS230205,Nguyễn Quốc Khánh,Nam,2018-12-15,102 Khuất Duy Tiến - Hà Nộ
                       <>
                         <video
                           ref={videoRef}
-                          className="w-full h-full object-cover transform scale-x-[-1]"
+                          autoPlay
                           playsInline
+                          muted
+                          className={`w-full h-full object-cover ${facingMode === 'user' ? 'transform scale-x-[-1]' : ''}`}
                         />
+                        {/* Floating Switch Camera button */}
+                        <button
+                          type="button"
+                          onClick={toggleFacingMode}
+                          className="absolute top-2 right-2 z-30 p-2 bg-slate-900/80 hover:bg-slate-900 backdrop-blur-md text-white border border-slate-700/60 rounded-full shadow-lg transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center justify-center"
+                          title="Đổi camera trước/sau"
+                        >
+                          <RefreshCw size={12} className="text-white" />
+                        </button>
                         {/* Biometric overlay ring */}
                         <div className="absolute inset-4 border-2 border-dashed border-emerald-400 rounded-full opacity-60 flex items-center justify-center animate-pulse pointer-events-none">
                           <span className="text-[9px] text-emerald-300 font-semibold bg-slate-950/80 px-2 py-0.5 rounded-full uppercase">
