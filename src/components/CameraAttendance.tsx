@@ -28,9 +28,10 @@ import {
   RefreshCw,
   UserX
 } from 'lucide-react';
-import { Student, AttendanceRecord, AttendanceStatus, SchoolSettings } from '../types';
+import { Student, AttendanceRecord, AttendanceStatus, SchoolSettings, ParentNotification } from '../types';
 import { audioService } from '../utils/audio';
 import { generateMockLandmarks, FacialLandmarks } from '../utils/faceSim';
+import { StorageService } from '../utils/storage';
 
 interface CameraAttendanceProps {
   students: Student[];
@@ -79,6 +80,23 @@ export default function CameraAttendance({
   // Parent notification status state after attendance scan
   const [notifDetails, setNotifDetails] = useState<{ studentName: string; phone: string; photo: string; time: string; success: boolean } | null>(null);
   const [isSendingNotif, setIsSendingNotif] = useState(false);
+  const [activeToast, setActiveToast] = useState<{
+    id: string;
+    studentName: string;
+    parentPhone: string;
+    photo: string;
+    time: string;
+    status: AttendanceStatus;
+  } | null>(null);
+
+  // Auto-dismiss parent SMS toast notification after 5 seconds
+  useEffect(() => {
+    if (!activeToast) return;
+    const timer = setTimeout(() => {
+      setActiveToast(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [activeToast]);
 
   // Refs for camera streaming and facial overlay canvas
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -483,24 +501,221 @@ export default function CameraAttendance({
     audioService.playSuccess();
     setSelectedSimStudentId(''); // Kết thúc điểm danh cho trẻ đó và sẵn sàng cho trẻ tiếp theo
 
-    // 4. Capture real photo from live video feed if active
+    // 4. Capture real photo from live video feed if active, or generate high-fidelity biometric placeholder if simulated
     let capturedPhoto = student.avatar;
-    if (videoRef.current && streamRef.current && videoRef.current.readyState >= 2) {
-      try {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = videoRef.current.videoWidth || 640;
-        tempCanvas.height = videoRef.current.videoHeight || 480;
-        const tempCtx = tempCanvas.getContext('2d');
-        if (tempCtx) {
-          // Flip horizontally to match current mirrored video stream
-          tempCtx.translate(tempCanvas.width, 0);
-          tempCtx.scale(-1, 1);
-          tempCtx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
-          capturedPhoto = tempCanvas.toDataURL('image/jpeg', 0.85);
+    try {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = 640;
+      tempCanvas.height = 480;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (tempCtx) {
+        let hasRealFrame = false;
+        if (videoRef.current && streamRef.current && videoRef.current.readyState >= 2) {
+          try {
+            // Flip horizontally to match current mirrored video stream if user-facing
+            if (facingMode === 'user') {
+              tempCtx.translate(tempCanvas.width, 0);
+              tempCtx.scale(-1, 1);
+            }
+            tempCtx.drawImage(videoRef.current, 0, 0, tempCanvas.width, tempCanvas.height);
+            if (facingMode === 'user') {
+              tempCtx.translate(tempCanvas.width, 0);
+              tempCtx.scale(-1, 1);
+            }
+            hasRealFrame = true;
+          } catch (err) {
+            console.warn('Error rendering video frame to canvas:', err);
+          }
         }
-      } catch (err) {
-        console.warn('Error capturing from video stream:', err);
+
+        if (hasRealFrame) {
+          // --- DRAW VIDEO HUD OVERLAY ---
+          const centerX = tempCanvas.width / 2;
+          const centerY = tempCanvas.height / 2;
+
+          // 1. Vẽ vòng tròn định vị mờ
+          tempCtx.strokeStyle = 'rgba(16, 185, 129, 0.45)'; // Emerald mờ
+          tempCtx.lineWidth = 1.5;
+          tempCtx.beginPath();
+          tempCtx.arc(centerX, centerY, 100, 0, 2 * Math.PI);
+          tempCtx.stroke();
+
+          // 2. Vẽ 4 góc định vị màu xanh lá
+          tempCtx.strokeStyle = '#10b981';
+          tempCtx.lineWidth = 4;
+          const cornerLen = 25;
+          const boxX = centerX - 90;
+          const boxY = centerY - 90;
+          const boxW = 180;
+          const boxH = 180;
+
+          // Top Left
+          tempCtx.beginPath(); tempCtx.moveTo(boxX, boxY + cornerLen); tempCtx.lineTo(boxX, boxY); tempCtx.lineTo(boxX + cornerLen, boxY); tempCtx.stroke();
+          // Top Right
+          tempCtx.beginPath(); tempCtx.moveTo(boxX + boxW - cornerLen, boxY); tempCtx.lineTo(boxX + boxW, boxY); tempCtx.lineTo(boxX + boxW, boxY + cornerLen); tempCtx.stroke();
+          // Bottom Left
+          tempCtx.beginPath(); tempCtx.moveTo(boxX, boxY + boxH - cornerLen); tempCtx.lineTo(boxX, boxY + boxH); tempCtx.lineTo(boxX + cornerLen, boxY + boxH); tempCtx.stroke();
+          // Bottom Right
+          tempCtx.beginPath(); tempCtx.moveTo(boxX + boxW - cornerLen, boxY + boxH); tempCtx.lineTo(boxX + boxW, boxY + boxH); tempCtx.lineTo(boxX + boxW, boxY + boxH - cornerLen); tempCtx.stroke();
+
+          // 3. Vẽ tag thông tin nhỏ dưới khung nhận diện
+          tempCtx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          tempCtx.fillRect(centerX - 95, centerY + 105, 190, 26);
+          tempCtx.strokeStyle = '#10b981';
+          tempCtx.lineWidth = 1.5;
+          tempCtx.strokeRect(centerX - 95, centerY + 105, 190, 26);
+
+          tempCtx.fillStyle = '#ffffff';
+          tempCtx.font = 'bold 11px Inter, system-ui, sans-serif';
+          tempCtx.textAlign = 'center';
+          tempCtx.fillText(student.fullName.toUpperCase(), centerX, centerY + 121);
+        } else {
+          // --- DRAW TECH BIOMETRIC HUD GRAPHICS AS SIMULATOR PHOTO ---
+          // Nền tối công nghệ hiện đại
+          tempCtx.fillStyle = '#0f172a';
+          tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+          // Vẽ các đường lưới scan chéo mờ
+          tempCtx.strokeStyle = 'rgba(59, 130, 246, 0.12)';
+          tempCtx.lineWidth = 1;
+          for (let i = -tempCanvas.height; i < tempCanvas.width; i += 30) {
+            tempCtx.beginPath();
+            tempCtx.moveTo(i, 0);
+            tempCtx.lineTo(i + tempCanvas.height, tempCanvas.height);
+            tempCtx.stroke();
+          }
+
+          // Vẽ vòng tròn sinh trắc học ở tâm
+          const centerX = tempCanvas.width / 2;
+          const centerY = tempCanvas.height / 2 - 30;
+          
+          // Vòng tròn ngoài cùng đứt nét
+          tempCtx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
+          tempCtx.lineWidth = 2;
+          tempCtx.setLineDash([8, 8]);
+          tempCtx.beginPath();
+          tempCtx.arc(centerX, centerY, 100, 0, 2 * Math.PI);
+          tempCtx.stroke();
+          tempCtx.setLineDash([]);
+
+          // Vòng tròn quét gương mặt
+          tempCtx.strokeStyle = '#10b981';
+          tempCtx.lineWidth = 1.5;
+          tempCtx.beginPath();
+          tempCtx.arc(centerX, centerY, 80, 0, 2 * Math.PI);
+          tempCtx.stroke();
+
+          // Vẽ khung mặt người tối giản
+          tempCtx.strokeStyle = '#3b82f6'; // Blue
+          tempCtx.lineWidth = 3.5;
+          tempCtx.beginPath();
+          // Đầu/Cằm
+          tempCtx.arc(centerX, centerY - 10, 40, 0.1 * Math.PI, 0.9 * Math.PI);
+          tempCtx.stroke();
+          // Mắt trái chữ thập
+          tempCtx.strokeStyle = '#60a5fa';
+          tempCtx.lineWidth = 1.5;
+          tempCtx.beginPath();
+          tempCtx.moveTo(centerX - 18, centerY - 25);
+          tempCtx.lineTo(centerX - 6, centerY - 25);
+          tempCtx.moveTo(centerX - 12, centerY - 31);
+          tempCtx.lineTo(centerX - 12, centerY - 19);
+          tempCtx.stroke();
+          // Mắt phải chữ thập
+          tempCtx.beginPath();
+          tempCtx.moveTo(centerX + 6, centerY - 25);
+          tempCtx.lineTo(centerX + 18, centerY - 25);
+          tempCtx.moveTo(centerX + 12, centerY - 31);
+          tempCtx.lineTo(centerX + 12, centerY - 19);
+          tempCtx.stroke();
+          // Miệng cười nhẹ
+          tempCtx.beginPath();
+          tempCtx.arc(centerX, centerY, 15, 0.1 * Math.PI, 0.9 * Math.PI);
+          tempCtx.stroke();
+
+          // Khung xương hàm/tai mờ
+          tempCtx.strokeStyle = 'rgba(96, 165, 250, 0.4)';
+          tempCtx.beginPath();
+          tempCtx.arc(centerX, centerY, 55, 0, Math.PI, false);
+          tempCtx.stroke();
+
+          // Sóng quét radar laser màu xanh lá mờ đi qua mặt
+          const laserGradient = tempCtx.createLinearGradient(0, centerY - 90, 0, centerY + 90);
+          laserGradient.addColorStop(0, 'rgba(16, 185, 129, 0)');
+          laserGradient.addColorStop(0.5, 'rgba(16, 185, 129, 0.18)');
+          laserGradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+          tempCtx.fillStyle = laserGradient;
+          tempCtx.fillRect(centerX - 90, centerY - 90, 180, 180);
+
+          // Hiển thị thông tin học sinh được phân tích bằng font chữ công nghệ
+          tempCtx.fillStyle = '#ffffff';
+          tempCtx.font = 'bold 18px sans-serif';
+          tempCtx.textAlign = 'center';
+          tempCtx.fillText(student.fullName.toUpperCase(), centerX, centerY + 120);
+          
+          tempCtx.fillStyle = '#60a5fa';
+          tempCtx.font = 'bold 12px monospace';
+          tempCtx.fillText(`ID: ${student.studentCode} • MATCHED 99%`, centerX, centerY + 142);
+
+          tempCtx.fillStyle = '#10b981';
+          tempCtx.fillText(`STATUS: VERIFIED`, centerX, centerY + 162);
+        }
+
+        // --- DRAW GENERAL CAMERA OVERLAYS (REC, TIMESTAMP) ---
+        tempCtx.font = 'bold 14px monospace';
+        tempCtx.fillStyle = '#ef4444'; // Red color for REC
+        tempCtx.beginPath();
+        tempCtx.arc(35, 35, 6, 0, 2 * Math.PI);
+        tempCtx.fill();
+        
+        tempCtx.fillStyle = '#ffffff';
+        tempCtx.textAlign = 'left';
+        tempCtx.fillText('REC', 48, 40);
+        tempCtx.fillText('CAM_01', 30, 65);
+        
+        // Vẽ timestamp ở góc dưới bên phải
+        const nowStr = new Date().toLocaleString('vi-VN');
+        tempCtx.textAlign = 'right';
+        tempCtx.fillText(nowStr, tempCanvas.width - 30, tempCanvas.height - 30);
+        
+        // Vẽ khung ngắm ở 4 góc ngoài cùng của ảnh camera
+        tempCtx.strokeStyle = '#10b981'; // Green framing
+        tempCtx.lineWidth = 3;
+        const bracketLen = 30;
+        const margin = 15;
+        
+        // Top Left
+        tempCtx.beginPath();
+        tempCtx.moveTo(margin, margin + bracketLen);
+        tempCtx.lineTo(margin, margin);
+        tempCtx.lineTo(margin + bracketLen, margin);
+        tempCtx.stroke();
+        
+        // Top Right
+        tempCtx.beginPath();
+        tempCtx.moveTo(tempCanvas.width - margin - bracketLen, margin);
+        tempCtx.lineTo(tempCanvas.width - margin, margin);
+        tempCtx.lineTo(tempCanvas.width - margin, margin + bracketLen);
+        tempCtx.stroke();
+        
+        // Bottom Left
+        tempCtx.beginPath();
+        tempCtx.moveTo(margin, tempCanvas.height - margin - bracketLen);
+        tempCtx.lineTo(margin, tempCanvas.height - margin);
+        tempCtx.lineTo(margin + bracketLen, tempCanvas.height - margin);
+        tempCtx.stroke();
+        
+        // Bottom Right
+        tempCtx.beginPath();
+        tempCtx.moveTo(tempCanvas.width - margin - bracketLen, tempCanvas.height - margin);
+        tempCtx.lineTo(tempCanvas.width - margin, tempCanvas.height - margin);
+        tempCtx.lineTo(tempCanvas.width - margin, tempCanvas.height - margin - bracketLen);
+        tempCtx.stroke();
+
+        capturedPhoto = tempCanvas.toDataURL('image/jpeg', 0.85);
       }
+    } catch (err) {
+      console.warn('Error capturing or drawing overlay on attendance photo:', err);
     }
 
     const checkinTimeStr = now.toLocaleTimeString('vi-VN');
@@ -539,6 +754,19 @@ export default function CameraAttendance({
       setIsSendingNotif(false);
       setNotifDetails(prev => prev ? { ...prev, success: true } : null);
       
+      // Phát âm thanh gửi thông báo phụ huynh dễ thương
+      audioService.playNotificationSend();
+
+      // Hiển thị Toast thông báo phụ huynh
+      setActiveToast({
+        id: 'toast_' + Date.now(),
+        studentName: student.fullName,
+        parentPhone: student.parentPhone || 'Chưa cập nhật',
+        photo: capturedPhoto,
+        time: checkinTimeStr,
+        status,
+      });
+
       // Save notification log to history/local logs for complete auditing
       try {
         const savedLogs = localStorage.getItem('school_attendance_notification_logs');
@@ -555,6 +783,21 @@ export default function CameraAttendance({
           message: `Thông báo điểm danh: Bé ${student.fullName} đã vào lớp lúc ${checkinTimeStr} ngày ${todayStr}. Trạng thái: ${isLate ? 'Đi muộn' : 'Đúng giờ'}. Đính kèm ảnh điểm danh từ camera.`
         };
         localStorage.setItem('school_attendance_notification_logs', JSON.stringify([newLog, ...logs]));
+
+        // Lưu thông báo lên thanh công cụ chuông cho phụ huynh
+        const parentNotifs = StorageService.getParentNotifications();
+        const newParentNotif: ParentNotification = {
+          id: 'parent_notif_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          classId: student.classId,
+          className: student.className || 'Chưa xếp lớp',
+          type: 'attendance_scan',
+          title: `Báo cáo điểm danh: Bé ${student.fullName}`,
+          content: `Bé ${student.fullName} đã điểm danh vào lớp thành công lúc ${checkinTimeStr} ngày ${todayStr}. Trạng thái: ${status === 'present' ? 'Đúng giờ' : 'Đến muộn'}. [Ấn vào để xem ảnh camera]`,
+          createdAt: new Date().toISOString(),
+          isRead: false,
+          photo: capturedPhoto,
+        };
+        StorageService.saveParentNotifications([newParentNotif, ...parentNotifs]);
       } catch (e) {
         console.error('Failed to log parent notification:', e);
       }
@@ -1088,19 +1331,40 @@ export default function CameraAttendance({
                   className="flex-1 flex flex-col justify-center space-y-6 py-4"
                 >
                   <div className="flex flex-col items-center text-center space-y-3">
-                    <div className="relative">
-                      <div className="absolute -inset-1 rounded-full bg-emerald-500/20 blur-md animate-pulse" />
-                      <div className="w-24 h-24 rounded-3xl overflow-hidden border-4 border-emerald-500 shadow-2xl relative z-10">
-                        <img
-                          src={lastScannedStudent.avatar}
-                          alt={lastScannedStudent.fullName}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
+                    {/* Hiển thị ảnh đôi: Ảnh hồ sơ đăng ký và Ảnh chụp camera thực tế */}
+                    <div className="flex gap-5 items-center justify-center pt-2">
+                      <div className="relative">
+                        <div className="absolute -inset-1 rounded-2xl bg-emerald-500/20 blur-md animate-pulse" />
+                        <div className="w-24 h-24 rounded-2xl overflow-hidden border-3 border-emerald-500 shadow-2xl relative z-10 bg-slate-800">
+                          <img
+                            src={lastScannedStudent.avatar}
+                            alt={lastScannedStudent.fullName}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-20 px-2 py-0.5 rounded bg-emerald-500 text-white text-[9px] font-extrabold whitespace-nowrap tracking-wider shadow-md">
+                          HỒ SƠ GỐC
+                        </span>
+                      </div>
+
+                      <div className="relative">
+                        <div className="absolute -inset-1 rounded-2xl bg-blue-500/20 blur-md animate-pulse" />
+                        <div className="w-24 h-24 rounded-2xl overflow-hidden border-3 border-blue-500 shadow-2xl relative z-10 bg-slate-800">
+                          <img
+                            src={notifDetails?.photo || lastScannedStudent.avatar}
+                            alt="Captured frame"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 z-20 px-2 py-0.5 rounded bg-blue-500 text-white text-[9px] font-extrabold whitespace-nowrap tracking-wider shadow-md">
+                          ẢNH CAMERA
+                        </span>
                       </div>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="space-y-1 pt-3">
                       <div className="flex items-center gap-2 justify-center">
                         <h2 className="text-2xl font-black text-white tracking-tight">
                           {lastScannedStudent.fullName}
@@ -1845,17 +2109,33 @@ export default function CameraAttendance({
                   exit={{ opacity: 0 }}
                   className="space-y-4"
                 >
-                  {/* Student Card header */}
+                  {/* Student Card header - Hiển thị ảnh đôi trực quan */}
                   <div className="flex gap-4 items-center">
-                    <div className="w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 border-2 border-emerald-500 shadow-md shrink-0">
-                      <img
-                        src={lastScannedStudent.avatar}
-                        alt={lastScannedStudent.fullName}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
+                    <div className="flex gap-2 shrink-0">
+                      <div className="relative">
+                        <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 border-2 border-emerald-500 shadow-sm">
+                          <img
+                            src={lastScannedStudent.avatar}
+                            alt={lastScannedStudent.fullName}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-emerald-500 text-white text-[7px] font-bold whitespace-nowrap">HỒ SƠ</span>
+                      </div>
+                      <div className="relative">
+                        <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 border-2 border-blue-500 shadow-sm">
+                          <img
+                            src={notifDetails?.photo || lastScannedStudent.avatar}
+                            alt="Captured frame"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-blue-500 text-white text-[7px] font-bold whitespace-nowrap">CAMERA</span>
+                      </div>
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 pl-1">
                       <div className="flex items-center gap-1.5">
                         <h4 className="text-base font-bold text-slate-950 dark:text-white leading-tight">
                           {lastScannedStudent.fullName}
@@ -2490,6 +2770,75 @@ export default function CameraAttendance({
           </div>
         </div>
       )}
+
+      {/* REAL-TIME PARENT NOTIFICATION TOAST POPUP */}
+      <AnimatePresence>
+        {activeToast && (
+          <motion.div
+            initial={{ opacity: 0, x: 150, y: 0, scale: 0.9 }}
+            animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 150, scale: 0.9, transition: { duration: 0.25 } }}
+            className="fixed bottom-6 right-6 z-[150] w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col text-slate-800 dark:text-slate-100"
+          >
+            {/* Header Toast */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-3.5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-white/10 rounded-lg">
+                  <Send size={14} className="text-white animate-bounce" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-extrabold tracking-widest uppercase opacity-80 block leading-none">Hệ Thống SMS</span>
+                  <h4 className="text-xs font-black tracking-wide leading-none">ĐÃ GỬI BÁO CÁO PHỤ HUYNH</h4>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveToast(null)}
+                className="text-white/80 hover:text-white bg-white/10 p-1 rounded-full transition cursor-pointer"
+              >
+                <X size={12} />
+              </button>
+            </div>
+
+            {/* Content Toast */}
+            <div className="p-4 space-y-3">
+              <div className="flex gap-3 items-start">
+                {/* Captured Photo */}
+                <div className="relative shrink-0">
+                  <div className="w-14 h-14 rounded-xl overflow-hidden border-2 border-emerald-500 shadow-sm bg-slate-100">
+                    <img src={activeToast.photo} className="w-full h-full object-cover" alt="Captured Frame" />
+                  </div>
+                  <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 rounded-full bg-emerald-500 text-white text-[6px] font-extrabold whitespace-nowrap uppercase shadow-xs">CAM_01</span>
+                </div>
+
+                <div className="flex-1 min-w-0 space-y-1">
+                  <p className="text-xs font-black text-slate-850 dark:text-white leading-tight">
+                    Bé {activeToast.studentName}
+                  </p>
+                  <p className="text-[10px] text-slate-400 font-bold">
+                    SĐT Phụ huynh: <span className="text-slate-600 dark:text-slate-300">{activeToast.parentPhone}</span>
+                  </p>
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-[8px] font-extrabold uppercase">
+                      ● ĐÃ GỬI THÀNH CÔNG
+                    </span>
+                    <span className="text-[9px] text-slate-400 font-mono font-bold">
+                      {activeToast.time}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* SMS preview box */}
+              <div className="p-2.5 bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-850/60 rounded-xl space-y-1">
+                <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest block">Nội Dung Tin Nhắn Gửi Đi (Mô Phỏng):</span>
+                <p className="text-[10px] text-slate-600 dark:text-slate-300 leading-normal font-medium">
+                  "Bé {activeToast.studentName} đã điểm danh vào lớp lúc {activeToast.time} ngày {new Date().toLocaleDateString('vi-VN')}. Trạng thái: {activeToast.status === 'present' ? 'Đúng giờ' : 'Đến muộn'}. [Đính kèm ảnh camera thực tế]"
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

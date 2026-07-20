@@ -72,6 +72,30 @@ class AudioService {
       console.warn('Audio playError failed:', e);
     }
   }
+
+  public playNotificationSend() {
+    try {
+      this.init();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      
+      // Ping nhẹ dễ thương trượt tần số lên cao
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now); // A5
+      osc.frequency.exponentialRampToValueAtTime(1760, now + 0.15); // Slide up to A6
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch (e) {
+      console.warn('Audio playNotificationSend failed:', e);
+    }
+  }
 }
 
 export const audioService = new AudioService();

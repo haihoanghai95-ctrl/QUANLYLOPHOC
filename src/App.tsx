@@ -32,7 +32,9 @@ import {
   Calendar,
   Trash2,
   Edit,
-  Pill
+  Pill,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 import { Classroom, Student, AttendanceRecord, SchoolSettings, UserSession, AbsenceReport, TeacherAccount, WeeklyMenu, TeacherNotification } from './types';
@@ -62,6 +64,17 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced' | 'error' | 'offline'>('syncing');
   const [showRulesHelper, setShowRulesHelper] = useState(false);
   const [rulesCopied, setRulesCopied] = useState(false);
+
+  // App toast notifications state
+  const [appToasts, setAppToasts] = useState<{ id: string; type: 'success' | 'warning' | 'info' | 'error'; title: string; message: string; }[]>([]);
+
+  const showAppToast = (type: 'success' | 'warning' | 'info' | 'error', title: string, message: string) => {
+    const newToast = { id: 'app_toast_' + Date.now() + Math.random().toString(36).substring(2, 5), type, title, message };
+    setAppToasts(prev => [...prev, newToast]);
+    setTimeout(() => {
+      setAppToasts(prev => prev.filter(t => t.id !== newToast.id));
+    }, 4500);
+  };
 
   // State Management loaded from localStorage
   const [session, setSession] = useState<UserSession | null>(() => StorageService.getSession());
@@ -133,6 +146,67 @@ export default function App() {
     StorageService.initialize();
     setSettings(StorageService.getSettings());
     runFirebaseSync();
+  }, []);
+
+  // Listen for online/offline and custom attendance sync events
+  useEffect(() => {
+    const handleOnline = async () => {
+      setSyncStatus('syncing');
+      showAppToast('info', 'Đã Kết Nối Mạng 🌐', 'Hệ thống đang kiểm tra và đồng bộ lại các dữ liệu tạm thời...');
+      
+      const didSync = await StorageService.syncUnsyncedAttendance();
+      if (didSync) {
+        showAppToast('success', 'Đồng Bộ Thành Công ⚡', 'Dữ liệu điểm danh lưu tạm đã được tải lên Firebase thành công!');
+        // Refresh local memory and state
+        const updatedAttendance = StorageService.getAttendance();
+        setAttendance(updatedAttendance);
+      }
+      
+      await runFirebaseSync();
+    };
+
+    const handleOffline = () => {
+      setSyncStatus('offline');
+      showAppToast('warning', 'Mất Kết Nối Mạng 📡', 'Bạn đang hoạt động ngoại tuyến. Các thay đổi sẽ được lưu tạm tại trình duyệt.');
+    };
+
+    const handleAttendanceOfflineSaved = () => {
+      showAppToast('warning', 'Đã Lưu Tạm Ngoại Tuyến 💾', 'Thiết bị mất mạng! Bản ghi điểm danh đã được lưu tạm vào bộ nhớ thiết bị.');
+    };
+
+    const handleAttendanceSyncedOnline = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail?.isRecovery) {
+        // Handled by handleOnline
+        return;
+      }
+      showAppToast('success', 'Đã Đồng Bộ Cloud ☁️', 'Bản ghi điểm danh mới đã được lưu và đồng bộ lên Firebase!');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('attendance-offline-saved', handleAttendanceOfflineSaved);
+    window.addEventListener('attendance-synced-online', handleAttendanceSyncedOnline);
+
+    // Initial check on mount
+    if (!navigator.onLine) {
+      setSyncStatus('offline');
+    } else {
+      StorageService.syncUnsyncedAttendance().then(didSync => {
+        if (didSync) {
+          showAppToast('success', 'Tự Động Đồng Bộ ⚡', 'Đã tự động tải lên các bản ghi điểm danh ngoại tuyến trước đó.');
+          const updatedAttendance = StorageService.getAttendance();
+          setAttendance(updatedAttendance);
+        }
+      });
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('attendance-offline-saved', handleAttendanceOfflineSaved);
+      window.removeEventListener('attendance-synced-online', handleAttendanceSyncedOnline);
+    };
   }, []);
 
   // Layout states
@@ -545,7 +619,13 @@ export default function App() {
             <button
               onClick={() => setShowRulesHelper(true)}
               className="flex items-center gap-2 px-3.5 py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-full text-xs font-semibold select-none cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title={syncStatus === 'error' ? "Lỗi phân quyền Firestore. Nhấp để xem hướng dẫn cấu hình lại Security Rules." : "Xem cấu hình phân quyền Cloud Firebase"}
+              title={
+                syncStatus === 'offline'
+                  ? "Bạn đang ở chế độ ngoại tuyến. Dữ liệu điểm danh được lưu tạm tại trình duyệt và tự động đồng bộ khi có mạng."
+                  : syncStatus === 'error'
+                  ? "Lỗi phân quyền Firestore. Nhấp để xem hướng dẫn cấu hình lại Security Rules."
+                  : "Xem cấu hình phân quyền Cloud Firebase"
+              }
             >
               {syncStatus === 'syncing' ? (
                 <span className="flex items-center gap-1.5 text-amber-500 font-medium">
@@ -556,6 +636,11 @@ export default function App() {
                 <span className="flex items-center gap-1.5 text-emerald-500 font-medium" title="Đã kết nối với database Firebase của bạn">
                   <span className="w-2 h-2 bg-emerald-500 rounded-full" />
                   Cloud Synced
+                </span>
+              ) : syncStatus === 'offline' ? (
+                <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-medium">
+                  <WifiOff size={12} className="text-slate-400 dark:text-slate-500 animate-pulse" />
+                  Ngoại tuyến (Lưu tạm)
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 text-rose-500 font-medium">
@@ -1481,6 +1566,55 @@ service cloud.firestore {
           </div>
         </div>
       )}
+
+      {/* 8. FLOATING SYSTEM TOAST NOTIFICATIONS */}
+      <div className="fixed top-5 right-5 z-[200] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+        <AnimatePresence>
+          {appToasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: -20, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.15 } }}
+              className={`p-4 rounded-2xl shadow-xl border backdrop-blur-md flex gap-3 pointer-events-auto ${
+                toast.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300'
+                  : toast.type === 'warning'
+                  ? 'bg-amber-500/10 border-amber-500/20 text-amber-800 dark:text-amber-300'
+                  : toast.type === 'error'
+                  ? 'bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-300'
+                  : 'bg-blue-500/10 border-blue-500/20 text-blue-800 dark:text-blue-300'
+              }`}
+            >
+              <div className="shrink-0 mt-0.5">
+                {toast.type === 'success' ? (
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500 text-white text-xs font-bold">✓</span>
+                ) : toast.type === 'warning' ? (
+                  <AlertTriangle size={18} className="text-amber-500" />
+                ) : toast.type === 'error' ? (
+                  <AlertCircle size={18} className="text-rose-500" />
+                ) : (
+                  <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-500 text-white text-xs font-bold">i</span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h5 className="text-xs font-black uppercase tracking-wide mb-0.5 leading-none">
+                  {toast.title}
+                </h5>
+                <p className="text-[11px] font-medium leading-relaxed opacity-90">
+                  {toast.message}
+                </p>
+              </div>
+              <button
+                onClick={() => setAppToasts(prev => prev.filter(t => t.id !== toast.id))}
+                className="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-white transition p-0.5"
+              >
+                <X size={14} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
     </div>
   );

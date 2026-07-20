@@ -232,11 +232,12 @@ export interface ParentNotification {
   id: string;
   classId: string;
   className: string;
-  type: 'activity_create' | 'activity_update' | 'activity_delete' | 'medication_reject';
+  type: 'activity_create' | 'activity_update' | 'activity_delete' | 'medication_reject' | 'attendance_scan';
   title: string;
   content: string;
   createdAt: string;
   isRead: boolean;
+  photo?: string;
 }
 
 export interface MedicineItem {

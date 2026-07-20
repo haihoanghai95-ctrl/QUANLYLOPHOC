@@ -268,6 +268,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
   const [medSuccess, setMedSuccess] = useState(false);
   const [medError, setMedError] = useState('');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<string | null>(null);
+  const [selectedAttendancePhoto, setSelectedAttendancePhoto] = useState<string | null>(null);
   const [isMedDragging, setIsMedDragging] = useState(false);
 
   const handleMedFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1121,7 +1122,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto min-h-screen md:h-screen relative">
         
         {/* Top Header navbar */}
-        <header className="no-print h-16 sticky top-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/80 px-8 flex items-center justify-between z-20 shrink-0">
+        <header className="no-print h-16 sticky top-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/60 dark:border-slate-800/80 px-4 md:px-8 flex items-center justify-between z-20 shrink-0">
           
           <div className="flex items-center gap-3">
             {/* Hamburger button on Mobile */}
@@ -1158,11 +1159,11 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Cloud Sync Status Badge */}
-            <span className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-full text-xs font-semibold select-none text-emerald-500">
+            <span className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-full text-xs font-semibold select-none text-emerald-500 shrink-0" title="Hệ thống đã đồng bộ với đám mây Cloud Firebase">
               <span className="w-2 h-2 bg-emerald-500 rounded-full" />
-              Cloud Synced
+              <span className="hidden xs:inline">Cloud Synced</span>
             </span>
 
             {/* Digital Clock display */}
@@ -1195,7 +1196,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                   />
                   
                   {/* Dropdown body */}
-                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xl z-40 overflow-hidden animate-fade-in">
+                  <div className="fixed md:absolute top-14 md:top-auto left-4 md:left-auto right-4 md:right-0 mt-2 w-auto md:w-80 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xl z-40 overflow-hidden animate-fade-in">
                     <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20 flex items-center justify-between">
                       <span className="text-xs font-extrabold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                         🔔 Thông báo của lớp ({parentNotifications.length})
@@ -1223,7 +1224,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                           <div
                             key={notif.id}
                             className={`p-3.5 transition duration-200 relative group flex gap-2.5 ${
-                              notif.isRead ? 'opacity-70' : (notif.type === 'medication_reject' ? 'bg-rose-500/5 dark:bg-rose-950/5 border-l-2 border-rose-500' : 'bg-emerald-500/5')
+                              notif.isRead ? 'opacity-70' : (notif.type === 'medication_reject' ? 'bg-rose-500/5 dark:bg-rose-950/5 border-l-2 border-rose-500' : notif.type === 'attendance_scan' ? 'bg-blue-500/5 dark:bg-blue-950/5 border-l-2 border-blue-500' : 'bg-emerald-500/5')
                             }`}
                           >
                             <div className="shrink-0 mt-0.5">
@@ -1231,6 +1232,8 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                                 <span className="text-emerald-500 text-sm">✨</span>
                               ) : notif.type === 'medication_reject' ? (
                                 <span className="text-rose-500 text-sm">❌</span>
+                              ) : notif.type === 'attendance_scan' ? (
+                                <span className="text-blue-500 text-sm">📸</span>
                               ) : (
                                 <span className="text-blue-500 text-sm">📝</span>
                               )}
@@ -1244,18 +1247,46 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                                   {new Date(notif.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </div>
-                              <h5 className={`text-xs font-bold leading-snug ${notif.type === 'medication_reject' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-800 dark:text-white'}`}>
+                              <h5 className={`text-xs font-bold leading-snug ${notif.type === 'medication_reject' ? 'text-rose-600 dark:text-rose-400' : notif.type === 'attendance_scan' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-white'}`}>
                                 {notif.title}
                               </h5>
                               <p className="text-[11px] text-slate-500 dark:text-slate-450 leading-normal">
-                                {notif.content}
+                                {notif.type === 'attendance_scan' && notif.photo ? (
+                                  <>
+                                    {notif.content.replace('[Ấn vào để xem ảnh camera]', '').replace('[Ấn vào đây để xem ảnh camera]', '')}
+                                    <button
+                                      onClick={() => setSelectedAttendancePhoto(notif.photo)}
+                                      className="inline-flex items-center gap-1 text-blue-650 dark:text-blue-450 font-black hover:underline cursor-pointer ml-1"
+                                    >
+                                      [Ấn vào đây để xem ảnh camera 📸]
+                                    </button>
+                                  </>
+                                ) : (
+                                  notif.content
+                                )}
                               </p>
+
+                              {notif.type === 'attendance_scan' && notif.photo && (
+                                <div 
+                                  onClick={() => setSelectedAttendancePhoto(notif.photo || null)}
+                                  className="mt-2.5 relative inline-block cursor-pointer group/photo hover:scale-105 active:scale-95 transition-all duration-200"
+                                  title="Xem ảnh camera kích thước đầy đủ"
+                                >
+                                  <div className="w-20 h-20 rounded-xl overflow-hidden border-2 border-blue-500 shadow-md bg-slate-100 dark:bg-slate-800 group-hover/photo:border-blue-400 group-hover/photo:shadow-lg relative">
+                                    <img src={notif.photo} className="w-full h-full object-cover" alt="Biometric scan snapshot" />
+                                    <div className="absolute inset-0 bg-slate-950/15 group-hover/photo:bg-slate-950/40 transition-all duration-200 flex items-center justify-center">
+                                      <Eye size={16} className="text-white opacity-0 group-hover/photo:opacity-100 drop-shadow-md transition-all duration-200 transform scale-75 group-hover/photo:scale-100" />
+                                    </div>
+                                  </div>
+                                  <span className="absolute -bottom-1.5 -right-1.5 px-1.5 py-0.5 rounded-md bg-blue-600 text-white text-[7px] font-black uppercase tracking-wider shadow-sm">CAM_01</span>
+                                </div>
+                              )}
                               
                               <div className="flex items-center gap-2 pt-1.5">
                                 {!notif.isRead && (
                                   <button
                                     onClick={() => handleMarkParentNotifAsRead(notif.id)}
-                                    className={`text-[10px] font-bold hover:underline cursor-pointer ${notif.type === 'medication_reject' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+                                    className={`text-[10px] font-bold hover:underline cursor-pointer ${notif.type === 'medication_reject' ? 'text-rose-600 dark:text-rose-400' : notif.type === 'attendance_scan' ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}
                                   >
                                     Đọc
                                   </button>
@@ -1269,7 +1300,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                               </div>
                             </div>
                             {!notif.isRead && (
-                              <span className={`absolute top-3.5 right-3.5 w-1.5 h-1.5 rounded-full ${notif.type === 'medication_reject' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                              <span className={`absolute top-3.5 right-3.5 w-1.5 h-1.5 rounded-full ${notif.type === 'medication_reject' ? 'bg-rose-500' : notif.type === 'attendance_scan' ? 'bg-blue-500' : 'bg-emerald-500'}`} />
                             )}
                           </div>
                         ))
@@ -1281,9 +1312,9 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             </div>
 
             {/* User Profile Badge (Right) */}
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-xl">
-              <User size={13} className="text-slate-400" />
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 sm:px-3 sm:py-1.5 bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-xl shrink-0">
+              <User size={13} className="text-slate-400 shrink-0" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 max-w-[85px] xs:max-w-[120px] sm:max-w-[180px] md:max-w-none truncate">
                 {session.parentName || 'Phụ Huynh'}
               </span>
             </div>
@@ -2657,7 +2688,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
                             <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                               <button
                                 type="button"
-                                onClick={() => setSelectedPhotoModal(record.photoCaptured || selectedStudent.avatar)}
+                                onClick={() => setSelectedAttendancePhoto(record.photoCaptured || selectedStudent.avatar)}
                                 className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-950 rounded-lg text-[10px] font-bold uppercase shadow-sm cursor-pointer"
                               >
                                 Phóng to
@@ -3896,21 +3927,21 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
       )}
 
       {/* 6. REAL-TIME ATTENDANCE PHOTO LIGHTBOX */}
-      {selectedPhotoModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs" onClick={() => setSelectedPhotoModal(null)} />
+      {selectedAttendancePhoto && (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs animate-fade-in" onClick={() => setSelectedAttendancePhoto(null)} />
           
-          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-3 border border-slate-200 dark:border-slate-800 z-[110] shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100">
+          <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-3 border border-slate-200 dark:border-slate-800 z-[170] shadow-2xl animate-scale-in text-slate-800 dark:text-slate-100">
             <button 
-              onClick={() => setSelectedPhotoModal(null)} 
+              onClick={() => setSelectedAttendancePhoto(null)} 
               className="absolute top-5 right-5 z-20 p-2 bg-slate-900/60 hover:bg-slate-950 text-white rounded-full transition cursor-pointer"
             >
               <X size={18} />
             </button>
 
-            <div className="rounded-2xl overflow-hidden aspect-video bg-black flex items-center justify-center">
+            <div className="rounded-2xl overflow-hidden aspect-video bg-slate-950 flex items-center justify-center border border-slate-200 dark:border-slate-850">
               <img 
-                src={selectedPhotoModal} 
+                src={selectedAttendancePhoto} 
                 className="max-h-[75vh] w-full object-contain animate-fade-in" 
                 alt="Attendance Camera Snapshot Full" 
               />
@@ -3919,7 +3950,7 @@ export default function ParentDashboard({ session, onLogout, settings }: ParentD
             <div className="p-4 flex items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2 text-slate-500 font-medium">
                 <Camera size={16} className="text-emerald-500" />
-                <span>Ảnh ghi nhận thực tế từ hệ thống CameraAI Class-Cam</span>
+                <span className="font-bold text-slate-700 dark:text-slate-300 animate-pulse">Ảnh ghi nhận thực tế từ hệ thống CameraAI Class-Cam</span>
               </div>
               <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full font-mono font-bold text-slate-400">
                 Chụp lúc: Điểm danh tự động

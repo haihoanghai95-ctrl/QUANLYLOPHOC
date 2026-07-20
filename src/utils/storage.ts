@@ -961,7 +961,58 @@ export class StorageService {
 
   public static saveAttendance(attendance: AttendanceRecord[]) {
     localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(attendance));
-    saveAttendanceToFirebase(attendance).catch(handleSyncCatch);
+    
+    const trySync = async () => {
+      if (!navigator.onLine) {
+        localStorage.setItem('sma_attendance_needs_sync', 'true');
+        console.warn('[StorageService] Device is offline. Attendance saved to local cache, marked for later sync.');
+        window.dispatchEvent(new CustomEvent('attendance-offline-saved'));
+        return;
+      }
+      
+      try {
+        await saveAttendanceToFirebase(attendance);
+        localStorage.removeItem('sma_attendance_needs_sync');
+        console.log('[StorageService] Attendance synced to Firebase successfully.');
+        window.dispatchEvent(new CustomEvent('attendance-synced-online'));
+      } catch (err: any) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isPermissionError = errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("insufficient");
+        
+        if (isPermissionError) {
+          console.warn('[StorageService] Firebase sync blocked by security rules.');
+        } else {
+          localStorage.setItem('sma_attendance_needs_sync', 'true');
+          console.warn('[StorageService] Firebase sync failed due to network error. Marked as needs sync.', err);
+          window.dispatchEvent(new CustomEvent('attendance-offline-saved'));
+        }
+      }
+    };
+    
+    trySync();
+  }
+
+  public static async syncUnsyncedAttendance(): Promise<boolean> {
+    const needsSync = localStorage.getItem('sma_attendance_needs_sync') === 'true';
+    if (!needsSync) return false;
+    
+    if (!navigator.onLine) {
+      console.log('[StorageService] Cannot sync: Device is still offline.');
+      return false;
+    }
+    
+    console.log('[StorageService] Online again! Syncing local attendance to Firebase...');
+    try {
+      const localAttendance = this.getAttendance();
+      await saveAttendanceToFirebase(localAttendance);
+      localStorage.removeItem('sma_attendance_needs_sync');
+      console.log('[StorageService] Unsynced attendance synced to Firebase successfully on recovery.');
+      window.dispatchEvent(new CustomEvent('attendance-synced-online', { detail: { isRecovery: true } }));
+      return true;
+    } catch (err) {
+      console.error('[StorageService] Failed to sync unsynced attendance on recovery:', err);
+      return false;
+    }
   }
 
   // --- ADMIN PASSWORD ---
