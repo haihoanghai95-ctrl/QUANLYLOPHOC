@@ -229,14 +229,16 @@ export default function CameraAttendance({
         // Right
         ctx.fillRect(qrx + qrSize, qry, canvas.width - (qrx + qrSize), qrSize);
 
-        // Sweep line
-        const sweepY = qry + (Math.sin(now * 0.0035) + 1) * 0.5 * qrSize;
-        ctx.strokeStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#8b5cf6'; // Violet/emerald/rose
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(qrx + 8, sweepY);
-        ctx.lineTo(qrx + qrSize - 8, sweepY);
-        ctx.stroke();
+        // Sweep line (only draw when active scanning)
+        if (scanState === 'idle' || scanState === 'scanning') {
+          const sweepY = qry + (Math.sin(now * 0.0035) + 1) * 0.5 * qrSize;
+          ctx.strokeStyle = '#8b5cf6'; // Violet
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(qrx + 8, sweepY);
+          ctx.lineTo(qrx + qrSize - 8, sweepY);
+          ctx.stroke();
+        }
 
         // Corner brackets for QR box
         ctx.strokeStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#8b5cf6';
@@ -307,14 +309,16 @@ export default function CameraAttendance({
         const landmarks: FacialLandmarks = generateMockLandmarks(canvas.width, canvas.height, true);
         const { box, leftEye, rightEye, nose, mouth, jawline } = landmarks;
 
-        // 1. Draw glowing HUD radar scanning line sweeping vertically
-        const sweepY = box.y + (Math.sin(now * 0.002) + 1) * 0.5 * box.height;
-        ctx.strokeStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#3b82f6';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(box.x, sweepY);
-        ctx.lineTo(box.x + box.width, sweepY);
-        ctx.stroke();
+        // 1. Draw glowing HUD radar scanning line sweeping vertically (only draw when active scanning)
+        if (scanState === 'idle' || scanState === 'scanning') {
+          const sweepY = box.y + (Math.sin(now * 0.002) + 1) * 0.5 * box.height;
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(box.x, sweepY);
+          ctx.lineTo(box.x + box.width, sweepY);
+          ctx.stroke();
+        }
 
         // HUD green/red/blue scanner frame box brackets
         ctx.strokeStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#3b82f6';
@@ -618,49 +622,8 @@ export default function CameraAttendance({
     return () => clearTimeout(autoScanTimer);
   }, [isActive, autoPilot, scanState, students, attendance]);
 
-  // Tự động nhận diện khuôn mặt sau 3.5 giây khi camera đang mở ở trạng thái rảnh (kể cả khi không bật Auto-pilot)
-  useEffect(() => {
-    if (!isActive || autoPilot) return;
-    if (scanState !== 'idle') return;
-
-    const timer = setTimeout(() => {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
-      
-      let studentToScan: Student | null = null;
-      if (selectedSimStudentId) {
-        studentToScan = students.find(s => s.id === selectedSimStudentId) || null;
-      } else {
-        const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
-        if (eligibleStudents.length > 0) {
-          studentToScan = eligibleStudents[0];
-        } else if (students.length > 0) {
-          // Nếu tất cả đã được điểm danh, chọn ngẫu nhiên một bé để hiển thị thông tin trùng lặp
-          const randomIndex = Math.floor(Math.random() * students.length);
-          studentToScan = students[randomIndex];
-        }
-      }
-
-      if (studentToScan) {
-        triggerScanForStudent(studentToScan);
-      }
-    }, 3500); // Đợi 3.5 giây tự động lock-on nhận diện
-
-    return () => clearTimeout(timer);
-  }, [isActive, autoPilot, scanState, students, attendance, selectedSimStudentId]);
-
-  // Tự động kết thúc phiên điểm danh của bé và chuyển về trạng thái chờ quét sau 4.5 giây hiển thị kết quả thành công
-  useEffect(() => {
-    if (!isActive || autoPilot) return;
-    if (scanState === 'idle' || scanState === 'scanning') return;
-
-    const resetTimer = setTimeout(() => {
-      setScanState('idle');
-      setSelectedSimStudentId('');
-    }, 4500); // hiển thị kết quả trong 4.5 giây rồi chuyển về màn hình camera chờ quét bé tiếp theo
-
-    return () => clearTimeout(resetTimer);
-  }, [isActive, autoPilot, scanState]);
+  // Khi tắt chế độ tự động (Auto-pilot), chúng ta không tự động quét cũng như không tự động reset kết quả.
+  // Quá trình ghi nhận hoàn tất và dừng lại để giữ thông tin của bé vừa điểm danh trên màn hình.
 
   // Triggering simulation with student from simulator dropdown
   const triggerSimulatedCheckIn = () => {
@@ -1104,8 +1067,8 @@ export default function CameraAttendance({
                       <span>Kết thúc & Tiếp tục quét ➔</span>
                     </button>
                     {!autoPilot && (
-                      <p className="text-center text-[9px] text-slate-400 mt-1.5 animate-pulse">
-                        Tự động tiếp tục sau 4.5 giây...
+                      <p className="text-center text-[10px] text-emerald-400/80 mt-1.5 font-semibold">
+                        Đã ghi nhận điểm danh. Sẵn sàng quét bé tiếp theo.
                       </p>
                     )}
                   </div>
@@ -1848,8 +1811,8 @@ export default function CameraAttendance({
                       <span>Kết thúc & Tiếp tục quét ➔</span>
                     </button>
                     {!autoPilot && (
-                      <p className="text-center text-[9px] text-slate-400 mt-1.5 animate-pulse">
-                        Tự động tiếp tục sau 4.5 giây...
+                      <p className="text-center text-[10px] text-emerald-400/80 mt-1.5 font-semibold">
+                        Đã ghi nhận điểm danh. Sẵn sàng quét bé tiếp theo.
                       </p>
                     )}
                   </div>
