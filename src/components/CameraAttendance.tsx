@@ -25,7 +25,8 @@ import {
   X,
   Sun,
   Contrast,
-  RefreshCw
+  RefreshCw,
+  UserX
 } from 'lucide-react';
 import { Student, AttendanceRecord, AttendanceStatus, SchoolSettings } from '../types';
 import { audioService } from '../utils/audio';
@@ -388,19 +389,34 @@ export default function CameraAttendance({
         });
 
         // 3. Draw text label
-        ctx.fillStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#3b82f6';
         ctx.font = 'bold 11px Inter, sans-serif';
         ctx.textAlign = 'center';
         
         let textToShow = 'ĐANG TÌM KIẾM KHUÔN MẶT...';
-        if (scanState === 'scanning') {
-          textToShow = 'ĐANG TRÍCH XUẤT EMBEDDING...';
-        } else if (scanState === 'success' && lastScannedStudent) {
-          textToShow = `ĐÃ XÁC THỰC: ${lastScannedStudent.fullName.toUpperCase()} (${similarityScore}%)`;
-        } else if (scanState === 'unknown') {
-          textToShow = 'KHÔNG XÁC ĐỊNH TRÙNG KHỚP';
-        } else if (scanState === 'duplicate') {
-          textToShow = 'ĐÃ ĐIỂM DANH HÔM NAY';
+        if (students.length === 0) {
+          ctx.fillStyle = '#f59e0b'; // Amber warning color
+          textToShow = 'CHƯA CÓ DỮ LIỆU HỌC SINH';
+        } else {
+          ctx.fillStyle = scanState === 'success' ? '#10b981' : scanState === 'unknown' ? '#f43f5e' : '#3b82f6';
+          
+          if (scanState === 'scanning') {
+            textToShow = 'ĐANG TRÍCH XUẤT EMBEDDING...';
+          } else if (scanState === 'success' && lastScannedStudent) {
+            textToShow = `ĐÃ XÁC THỰC: ${lastScannedStudent.fullName.toUpperCase()} (${similarityScore}%)`;
+          } else if (scanState === 'unknown') {
+            textToShow = 'KHÔNG XÁC ĐỊNH TRÙNG KHỚP';
+          } else if (scanState === 'duplicate') {
+            textToShow = 'ĐÃ ĐIỂM DANH HÔM NAY';
+          } else {
+            // scanState === 'idle'
+            const todayStr = new Date().toISOString().split('T')[0];
+            const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
+            const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
+            if (eligibleStudents.length === 0) {
+              ctx.fillStyle = '#10b981'; // Green completed color
+              textToShow = 'TẤT CẢ ĐÃ ĐIỂM DANH XONG';
+            }
+          }
         }
         
         ctx.fillText(textToShow, box.x + box.width / 2, box.y - 12);
@@ -605,24 +621,64 @@ export default function CameraAttendance({
       return;
     }
 
-    const autoScanTimer = setTimeout(() => {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
-      const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
+    const todayStr = new Date().toISOString().split('T')[0];
+    const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
+    const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
 
-      if (eligibleStudents.length === 0) {
-        return;
+    const autoScanTimer = setTimeout(() => {
+      let studentToScan: Student | null = null;
+      
+      if (selectedSimStudentId) {
+        studentToScan = students.find(s => s.id === selectedSimStudentId) || null;
+      } else if (eligibleStudents.length > 0) {
+        const randomIndex = Math.floor(Math.random() * eligibleStudents.length);
+        studentToScan = eligibleStudents[randomIndex];
+      } else if (students.length > 0) {
+        // Nếu tất cả đã được điểm danh, chọn ngẫu nhiên một bé để hiển thị thông tin trùng lặp
+        const randomIndex = Math.floor(Math.random() * students.length);
+        studentToScan = students[randomIndex];
       }
 
-      const randomIndex = Math.floor(Math.random() * eligibleStudents.length);
-      const randomStudent = eligibleStudents[randomIndex];
-      triggerScanForStudent(randomStudent);
-    }, 1500); // wait 1.5 seconds in idle before launching a scan
+      if (studentToScan) {
+        triggerScanForStudent(studentToScan);
+      }
+    }, eligibleStudents.length > 0 ? 1500 : 3500); // wait 1.5s if active, or 3.5s for duplicates to keep simulation alive but slower
 
     return () => clearTimeout(autoScanTimer);
-  }, [isActive, autoPilot, scanState, students, attendance]);
+  }, [isActive, autoPilot, scanState, students, attendance, selectedSimStudentId]);
 
-  // Khi tắt chế độ tự động (Auto-pilot), chúng ta không tự động quét cũng như không tự động reset kết quả.
+  // Tự động nhận diện khuôn mặt sau 3 giây khi camera đang mở ở trạng thái rảnh (khi không bật Auto-pilot)
+  useEffect(() => {
+    if (!isActive || autoPilot) return;
+    if (scanState !== 'idle') return;
+
+    const timer = setTimeout(() => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const checkedInIds = new Set(attendance.filter(r => r.date === todayStr).map(r => r.studentId));
+      
+      let studentToScan: Student | null = null;
+      if (selectedSimStudentId) {
+        studentToScan = students.find(s => s.id === selectedSimStudentId) || null;
+      } else {
+        const eligibleStudents = students.filter(s => !checkedInIds.has(s.id));
+        if (eligibleStudents.length > 0) {
+          studentToScan = eligibleStudents[0];
+        } else if (students.length > 0) {
+          // Nếu tất cả đã được điểm danh, chọn ngẫu nhiên một bé để hiển thị thông tin trùng lặp
+          const randomIndex = Math.floor(Math.random() * students.length);
+          studentToScan = students[randomIndex];
+        }
+      }
+
+      if (studentToScan) {
+        triggerScanForStudent(studentToScan);
+      }
+    }, 3000); // Đợi 3 giây tự động lock-on nhận diện khuôn mặt
+
+    return () => clearTimeout(timer);
+  }, [isActive, autoPilot, scanState, students, attendance, selectedSimStudentId]);
+
+  // Khi tắt chế độ tự động (Auto-pilot), chúng ta không tự động reset kết quả.
   // Quá trình ghi nhận hoàn tất và dừng lại để giữ thông tin của bé vừa điểm danh trên màn hình.
 
   // Triggering simulation with student from simulator dropdown
@@ -750,6 +806,37 @@ export default function CameraAttendance({
                 height={canvasHeight}
                 className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
               />
+
+              {/* Empty students state overlay */}
+              {isActive && !hasCameraError && students.length === 0 && (
+                <div className="absolute inset-0 bg-slate-900/95 flex flex-col justify-center items-center p-6 text-center z-20 space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-amber-500">
+                    <UserX size={28} />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-black text-amber-500 uppercase tracking-wider">CHƯA CÓ HỌC SINH</h3>
+                    <p className="text-xs text-slate-350 max-w-xs leading-relaxed font-semibold">
+                      Lớp học hiện tại chưa có học sinh hoặc chưa được phân công. Vui lòng thêm học sinh ở tab <span className="text-white">"Học Sinh"</span> trước.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* All students checked-in overlay badge */}
+              {isActive && !hasCameraError && students.length > 0 && students.filter(s => !attendance.some(r => r.studentId === s.id && r.date === new Date().toISOString().split('T')[0])).length === 0 && (
+                <div className="absolute bottom-4 left-4 right-4 z-20 p-2.5 bg-emerald-550/95 backdrop-blur-md text-white text-xs rounded-xl flex items-center justify-between shadow-lg font-bold animate-fade-in border border-emerald-400/30">
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle size={14} className="shrink-0 text-white" />
+                    <span>✓ Lớp học đã hoàn thành điểm danh hôm nay!</span>
+                  </span>
+                  <button
+                    onClick={clearTodayAttendance}
+                    className="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-[9px] uppercase tracking-wider transition cursor-pointer"
+                  >
+                    Quét lại
+                  </button>
+                </div>
+              )}
 
               {/* Warning overlay for simulated errors */}
               {errorMessage && isActive && !hasCameraError && (
@@ -1360,6 +1447,37 @@ export default function CameraAttendance({
               height={canvasHeight}
               className={`absolute inset-0 z-10 w-full h-full pointer-events-none transition-opacity duration-300 ${isActive && !hasCameraError ? 'opacity-100' : 'opacity-0'}`}
             />
+
+            {/* Empty students state overlay */}
+            {isActive && !hasCameraError && students.length === 0 && (
+              <div className="absolute inset-0 bg-slate-900/95 flex flex-col justify-center items-center p-6 text-center z-20 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-amber-500">
+                  <UserX size={28} />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-black text-amber-500 uppercase tracking-wider">CHƯA CÓ HỌC SINH</h3>
+                  <p className="text-xs text-slate-350 max-w-xs leading-relaxed font-semibold">
+                    Lớp học hiện tại chưa có học sinh hoặc chưa được phân công. Vui lòng thêm học sinh ở tab <span className="text-violet-500 font-bold">"Học Sinh"</span> trước.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* All students checked-in overlay badge */}
+            {isActive && !hasCameraError && students.length > 0 && students.filter(s => !attendance.some(r => r.studentId === s.id && r.date === new Date().toISOString().split('T')[0])).length === 0 && (
+              <div className="absolute bottom-4 left-4 right-4 z-20 p-2.5 bg-emerald-550/95 backdrop-blur-md text-white text-xs rounded-xl flex items-center justify-between shadow-lg font-bold animate-fade-in border border-emerald-400/30">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle size={14} className="shrink-0 text-white" />
+                  <span>✓ Lớp học đã hoàn thành điểm danh hôm nay!</span>
+                </span>
+                <button
+                  onClick={clearTodayAttendance}
+                  className="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-[9px] uppercase tracking-wider transition cursor-pointer"
+                >
+                  Quét lại
+                </button>
+              </div>
+            )}
 
             {/* Offline/Blank Screen message */}
             {!isActive && (
